@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Sprite Sheet Cropper</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      padding: 2rem;
+      background: canvas;
+      color: canvastext;
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 1.75rem;
+    }
+
+    form {
+      display: grid;
+      gap: 1rem;
+      max-width: 420px;
+    }
+
+    fieldset {
+      border: 1px solid rgb(120 120 120 / 0.4);
+      border-radius: 0.75rem;
+      padding: 1rem;
+    }
+
+    legend {
+      padding: 0 0.5rem;
+      font-weight: 600;
+    }
+
+    label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.75rem;
+    }
+
+    input[type="number"] {
+      width: 6rem;
+    }
+
+    button {
+      padding: 0.75rem 1.25rem;
+      background: #0d6efd;
+      color: white;
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+
+    .preview {
+      margin-top: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    canvas {
+      max-width: min(100%, 640px);
+      border: 1px solid rgb(120 120 120 / 0.6);
+      border-radius: 0.5rem;
+      background: rgba(0, 0, 0, 0.05);
+    }
+
+    .error {
+      color: #d32f2f;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Sprite Sheet Cropper</h1>
+    <p>Select a sprite sheet, set the frame grid, choose crop margins, and download the rebuilt sheet.</p>
+
+    <form id="spriteForm">
+      <label>
+        Sprite sheet PNG
+        <input id="inputFile" type="file" accept="image/png,image/webp,image/jpeg" required>
+      </label>
+
+      <fieldset>
+        <legend>Frame Layout</legend>
+        <label>
+          Columns
+          <input id="columns" type="number" min="1" value="4" required>
+        </label>
+        <label>
+          Rows
+          <input id="rows" type="number" min="1" value="4" required>
+        </label>
+        <div style="margin-top: 0.75rem; padding: 0.75rem; background: rgba(0, 0, 0, 0.05); border-radius: 0.5rem;">
+          <div style="font-size: 0.9rem; margin-bottom: 0.5rem;">
+            <strong>Frame Size:</strong> <span id="frameSize">-</span>
+          </div>
+          <button id="autoDetectBtn" type="button" style="width: 100%; padding: 0.5rem; background: #28a745; font-size: 0.9rem;">Auto Detect Frames</button>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Crop Margins (px)</legend>
+        <label>
+          Top
+          <input id="cropTop" type="number" min="0" value="0">
+        </label>
+        <label>
+          Right
+          <input id="cropRight" type="number" min="0" value="0">
+        </label>
+        <label>
+          Bottom
+          <input id="cropBottom" type="number" min="0" value="0">
+        </label>
+        <label>
+          Left
+          <input id="cropLeft" type="number" min="0" value="0">
+        </label>
+      </fieldset>
+
+      <button id="processBtn" type="submit" disabled>Process Sprite Sheet</button>
+      <p id="error" class="error" role="alert" hidden></p>
+    </form>
+
+    <section class="preview">
+      <div>
+        <h2>Original Preview</h2>
+        <canvas id="inputCanvas" width="0" height="0" aria-label="Original sprite sheet preview"></canvas>
+      </div>
+      <div>
+        <h2>Result Preview</h2>
+        <canvas id="outputCanvas" width="0" height="0" aria-label="Processed sprite sheet preview"></canvas>
+      </div>
+      <button id="downloadBtn" type="button" disabled>Download Processed Sprite Sheet</button>
+    </section>
+  </main>
+
+  <script>
+    const fileInput = document.getElementById("inputFile");
+    const form = document.getElementById("spriteForm");
+    const processBtn = document.getElementById("processBtn");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const errorBox = document.getElementById("error");
+    const inputCanvas = document.getElementById("inputCanvas");
+    const outputCanvas = document.getElementById("outputCanvas");
+    const columnsInput = document.getElementById("columns");
+    const rowsInput = document.getElementById("rows");
+    const frameSizeDisplay = document.getElementById("frameSize");
+    const autoDetectBtn = document.getElementById("autoDetectBtn");
+
+    const inputCtx = inputCanvas.getContext("2d");
+    const outputCtx = outputCanvas.getContext("2d");
+
+    let loadedImage = null;
+    let outputBlob = null;
+
+    function showError(message) {
+      errorBox.hidden = false;
+      errorBox.textContent = message;
+    }
+
+    function clearError() {
+      errorBox.hidden = true;
+      errorBox.textContent = "";
+    }
+
+    function resetOutput() {
+      outputCanvas.width = 0;
+      outputCanvas.height = 0;
+      outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+      outputBlob = null;
+      downloadBtn.disabled = true;
+    }
+
+    function updateFrameSize() {
+      if (!loadedImage) {
+        frameSizeDisplay.textContent = "-";
+        return;
+      }
+      const columns = Number.parseInt(columnsInput.value, 10) || 1;
+      const rows = Number.parseInt(rowsInput.value, 10) || 1;
+      const frameWidth = Math.floor(loadedImage.width / columns);
+      const frameHeight = Math.floor(loadedImage.height / rows);
+      frameSizeDisplay.textContent = `${frameWidth} × ${frameHeight} px`;
+      
+      // Redraw image and grid lines
+      inputCtx.drawImage(loadedImage, 0, 0);
+      drawGridLines(inputCanvas, inputCtx, columns, rows);
+    }
+
+    function drawGridLines(canvas, ctx, columns, rows) {
+      if (!loadedImage || canvas.width === 0 || canvas.height === 0) return;
+
+      const frameWidth = canvas.width / columns;
+      const frameHeight = canvas.height / rows;
+
+      // Save current state
+      ctx.save();
+      
+      // Set line style
+      ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
+
+      // Draw vertical lines
+      for (let i = 1; i < columns; i++) {
+        const x = i * frameWidth;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+
+      // Draw horizontal lines
+      for (let i = 1; i < rows; i++) {
+        const y = i * frameHeight;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      // Restore state
+      ctx.restore();
+    }
+
+    function findCommonDivisors(n) {
+      const divisors = [];
+      for (let i = 1; i <= Math.sqrt(n); i++) {
+        if (n % i === 0) {
+          divisors.push(i);
+          if (i !== n / i) {
+            divisors.push(n / i);
+          }
+        }
+      }
+      return divisors.sort((a, b) => a - b);
+    }
+
+    function detectFrames() {
+      if (!loadedImage) {
+        showError("Please load an image first.");
+        return;
+      }
+
+      const width = loadedImage.width;
+      const height = loadedImage.height;
+
+      // Get image data for pattern detection
+      inputCanvas.width = width;
+      inputCanvas.height = height;
+      inputCtx.drawImage(loadedImage, 0, 0);
+      const imageData = inputCtx.getImageData(0, 0, width, height);
+      const data = imageData.data;
+
+      // Find common divisors
+      const widthDivisors = findCommonDivisors(width);
+      const heightDivisors = findCommonDivisors(height);
+
+      // Try to detect repeating patterns by checking frame boundaries
+      let bestColumns = 1;
+      let bestRows = 1;
+      let bestColumnScore = 0;
+      let bestRowScore = 0;
+
+      // Improved column detection - check for vertical separators
+      for (const cols of widthDivisors) {
+        if (cols < 2 || cols > 50) continue; // Reasonable range
+        const frameW = width / cols;
+        if (frameW < 4) continue; // Skip very small frames
+
+        // Check multiple vertical lines for frame boundaries
+        let boundaryMatches = 0;
+        const checkLines = Math.min(cols - 1, 10); // Check up to 10 boundaries
+        
+        for (let col = 1; col <= checkLines; col++) {
+          const x = col * frameW;
+          if (x >= width) break;
+          
+          // Sample pixels along this vertical line
+          let consistentPixels = 0;
+          const sampleCount = Math.min(height, 20);
+          const step = Math.max(1, Math.floor(height / sampleCount));
+          
+          for (let y = 0; y < height; y += step) {
+            const idx = Math.floor(y) * width * 4 + Math.floor(x) * 4;
+            if (idx + 2 < data.length) {
+              // Check if this looks like a boundary (transparent or consistent color)
+              const alpha = data[idx + 3];
+              // Count as boundary if alpha is low or if pixels on both sides are similar
+              if (alpha < 10) {
+                consistentPixels++;
+              } else if (x > 0 && x < width - 1) {
+                const leftIdx = Math.floor(y) * width * 4 + (Math.floor(x) - 1) * 4;
+                const rightIdx = Math.floor(y) * width * 4 + (Math.floor(x) + 1) * 4;
+                if (leftIdx >= 0 && rightIdx < data.length) {
+                  const diff = Math.abs(data[leftIdx] - data[rightIdx]) +
+                               Math.abs(data[leftIdx + 1] - data[rightIdx + 1]) +
+                               Math.abs(data[leftIdx + 2] - data[rightIdx + 2]);
+                  if (diff > 30) consistentPixels++; // High contrast suggests boundary
+                }
+              }
+            }
+          }
+          
+          if (consistentPixels / sampleCount > 0.3) {
+            boundaryMatches++;
+          }
+        }
+        
+        const score = boundaryMatches / checkLines;
+        if (score > bestColumnScore) {
+          bestColumnScore = score;
+          bestColumns = cols;
+        }
+      }
+
+      // Row detection - similar approach
+      for (const rows of heightDivisors) {
+        if (rows < 2 || rows > 50) continue;
+        const frameH = height / rows;
+        if (frameH < 4) continue;
+
+        let boundaryMatches = 0;
+        const checkLines = Math.min(rows - 1, 10);
+        
+        for (let row = 1; row <= checkLines; row++) {
+          const y = row * frameH;
+          if (y >= height) break;
+          
+          let consistentPixels = 0;
+          const sampleCount = Math.min(width, 20);
+          const step = Math.max(1, Math.floor(width / sampleCount));
+          
+          for (let x = 0; x < width; x += step) {
+            const idx = Math.floor(y) * width * 4 + Math.floor(x) * 4;
+            if (idx + 2 < data.length) {
+              const alpha = data[idx + 3];
+              if (alpha < 10) {
+                consistentPixels++;
+              } else if (y > 0 && y < height - 1) {
+                const topIdx = (Math.floor(y) - 1) * width * 4 + Math.floor(x) * 4;
+                const bottomIdx = (Math.floor(y) + 1) * width * 4 + Math.floor(x) * 4;
+                if (topIdx >= 0 && bottomIdx < data.length) {
+                  const diff = Math.abs(data[topIdx] - data[bottomIdx]) +
+                               Math.abs(data[topIdx + 1] - data[bottomIdx + 1]) +
+                               Math.abs(data[topIdx + 2] - data[bottomIdx + 2]);
+                  if (diff > 30) consistentPixels++;
+                }
+              }
+            }
+          }
+          
+          if (consistentPixels / sampleCount > 0.3) {
+            boundaryMatches++;
+          }
+        }
+        
+        const score = boundaryMatches / checkLines;
+        if (score > bestRowScore) {
+          bestRowScore = score;
+          bestRows = rows;
+        }
+      }
+
+      // Fallback: use common divisors if pattern detection didn't work
+      if (bestColumns === 1 || bestColumnScore < 0.2) {
+        // Filter reasonable divisors (2-50, but prefer common ones)
+        const reasonableWidthDivisors = widthDivisors.filter(d => d >= 2 && d <= 50);
+        
+        if (reasonableWidthDivisors.length > 0) {
+          // Prefer divisors that result in reasonable frame sizes (20-200px)
+          const goodDivisors = reasonableWidthDivisors.filter(d => {
+            const frameW = width / d;
+            return frameW >= 20 && frameW <= 200;
+          });
+          
+          if (goodDivisors.length > 0) {
+            // Prefer common sprite counts (4, 6, 8, 11, 12, 16, etc.)
+            const preferred = [11, 12, 8, 6, 16, 4, 10, 9, 7, 5];
+            for (const pref of preferred) {
+              if (goodDivisors.includes(pref)) {
+                bestColumns = pref;
+                break;
+              }
+            }
+            // If no preferred found, use the largest reasonable one
+            if (bestColumns === 1) {
+              bestColumns = goodDivisors[goodDivisors.length - 1];
+            }
+          } else {
+            // Fall back to any reasonable divisor
+            bestColumns = reasonableWidthDivisors[Math.min(3, reasonableWidthDivisors.length - 1)] || 4;
+          }
+        }
+      }
+
+      if (bestRows === 1 || bestRowScore < 0.2) {
+        const reasonableHeightDivisors = heightDivisors.filter(d => d >= 2 && d <= 50);
+        
+        if (reasonableHeightDivisors.length > 0) {
+          const goodDivisors = reasonableHeightDivisors.filter(d => {
+            const frameH = height / d;
+            return frameH >= 20 && frameH <= 200;
+          });
+          
+          if (goodDivisors.length > 0) {
+            bestRows = goodDivisors[goodDivisors.length - 1];
+          } else {
+            bestRows = reasonableHeightDivisors[Math.min(3, reasonableHeightDivisors.length - 1)] || 1;
+          }
+        } else {
+          bestRows = 1; // Single row sprite sheet
+        }
+      }
+
+      // Set detected values
+      columnsInput.value = bestColumns;
+      rowsInput.value = bestRows;
+      updateFrameSize();
+      clearError();
+      
+      // Redraw image with grid
+      inputCtx.drawImage(loadedImage, 0, 0);
+      drawGridLines(inputCanvas, inputCtx, bestColumns, bestRows);
+    }
+
+    fileInput.addEventListener("change", () => {
+      resetOutput();
+      clearError();
+
+      const file = fileInput.files?.[0];
+      if (!file) {
+        processBtn.disabled = true;
+        autoDetectBtn.disabled = true;
+        loadedImage = null;
+        inputCanvas.width = 0;
+        inputCanvas.height = 0;
+        frameSizeDisplay.textContent = "-";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          loadedImage = img;
+          inputCanvas.width = img.width;
+          inputCanvas.height = img.height;
+          inputCtx.drawImage(img, 0, 0);
+          processBtn.disabled = false;
+          autoDetectBtn.disabled = false;
+          updateFrameSize();
+        };
+        img.onerror = () => {
+          showError("Failed to load the image. Please select a valid image file.");
+          processBtn.disabled = true;
+          autoDetectBtn.disabled = true;
+          loadedImage = null;
+          frameSizeDisplay.textContent = "-";
+        };
+        img.src = reader.result;
+      };
+      reader.onerror = () => {
+        showError("Failed to read the selected file.");
+        processBtn.disabled = true;
+        autoDetectBtn.disabled = true;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    columnsInput.addEventListener("input", updateFrameSize);
+    rowsInput.addEventListener("input", updateFrameSize);
+    autoDetectBtn.addEventListener("click", detectFrames);
+    autoDetectBtn.disabled = true;
+
+    downloadBtn.addEventListener("click", () => {
+      if (!outputBlob) return;
+
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(outputBlob);
+      link.download = "sprite_sheet_cropped.png";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      clearError();
+
+      if (!loadedImage) {
+        showError("Select a sprite sheet image first.");
+        return;
+      }
+
+      const columns = Number.parseInt(document.getElementById("columns").value, 10);
+      const rows = Number.parseInt(document.getElementById("rows").value, 10);
+      const cropTop = Number.parseInt(document.getElementById("cropTop").value || "0", 10);
+      const cropRight = Number.parseInt(document.getElementById("cropRight").value || "0", 10);
+      const cropBottom = Number.parseInt(document.getElementById("cropBottom").value || "0", 10);
+      const cropLeft = Number.parseInt(document.getElementById("cropLeft").value || "0", 10);
+
+      if (!Number.isInteger(columns) || columns <= 0 || !Number.isInteger(rows) || rows <= 0) {
+        showError("Columns and rows must be positive integers.");
+        return;
+      }
+
+      const frameWidth = loadedImage.width / columns;
+      const frameHeight = loadedImage.height / rows;
+
+      if (!Number.isInteger(frameWidth) || !Number.isInteger(frameHeight)) {
+        showError("Image dimensions must be evenly divisible by the selected rows and columns.");
+        return;
+      }
+
+      if (cropLeft + cropRight >= frameWidth || cropTop + cropBottom >= frameHeight) {
+        showError("Cropping removes entire frames. Reduce the crop margins.");
+        return;
+      }
+
+      try {
+        const croppedFrameWidth = frameWidth - cropLeft - cropRight;
+        const croppedFrameHeight = frameHeight - cropTop - cropBottom;
+        const totalFrames = columns * rows;
+
+        outputCanvas.width = croppedFrameWidth * columns;
+        outputCanvas.height = croppedFrameHeight * rows;
+        outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+
+        const tempCanvas = document.createElement("canvas");
+        const tempCtx = tempCanvas.getContext("2d");
+        tempCanvas.width = frameWidth;
+        tempCanvas.height = frameHeight;
+
+        let frameIndex = 0;
+        for (let row = 0; row < rows; row += 1) {
+          for (let column = 0; column < columns; column += 1) {
+            const sx = column * frameWidth;
+            const sy = row * frameHeight;
+
+            tempCtx.clearRect(0, 0, frameWidth, frameHeight);
+            tempCtx.drawImage(
+              loadedImage,
+              sx,
+              sy,
+              frameWidth,
+              frameHeight,
+              0,
+              0,
+              frameWidth,
+              frameHeight
+            );
+
+            outputCtx.drawImage(
+              tempCanvas,
+              cropLeft,
+              cropTop,
+              croppedFrameWidth,
+              croppedFrameHeight,
+              column * croppedFrameWidth,
+              row * croppedFrameHeight,
+              croppedFrameWidth,
+              croppedFrameHeight
+            );
+
+            frameIndex += 1;
+          }
+        }
+
+        // Draw grid lines on output canvas
+        drawGridLines(outputCanvas, outputCtx, columns, rows);
+
+        outputBlob = await new Promise((resolve) =>
+          outputCanvas.toBlob((blob) => resolve(blob), "image/png")
+        );
+
+        if (!outputBlob) {
+          throw new Error("Failed to generate PNG output.");
+        }
+
+        downloadBtn.disabled = false;
+      } catch (err) {
+        console.error(err);
+        showError(err instanceof Error ? err.message : "Unexpected error while processing.");
+        resetOutput();
+      }
+    });
+  </script>
+</body>
+</html>
+
+

@@ -209,7 +209,6 @@
       if (!loadedImage || canvas.width === 0 || canvas.height === 0) return;
 
       const frameWidth = canvas.width / columns;
-      const frameHeight = canvas.height / rows;
 
       // Save current state
       ctx.save();
@@ -219,21 +218,12 @@
       ctx.lineWidth = 1;
       ctx.setLineDash([2, 2]);
 
-      // Draw vertical lines
+      // Draw vertical lines only
       for (let i = 1; i < columns; i++) {
         const x = i * frameWidth;
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-      }
-
-      // Draw horizontal lines
-      for (let i = 1; i < rows; i++) {
-        const y = i * frameHeight;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
         ctx.stroke();
       }
 

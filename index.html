@@ -213,10 +213,9 @@
       // Save current state
       ctx.save();
       
-      // Set line style
-      ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+      // Set line style - simple black light color
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
       ctx.lineWidth = 1;
-      ctx.setLineDash([2, 2]);
 
       // Draw vertical lines only
       for (let i = 1; i < columns; i++) {
